@@ -2,18 +2,63 @@ package orkestrator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/veronicashkarova/server-for-calc/pkg/calc"
 	"github.com/veronicashkarova/server-for-calc/pkg/contract"
-	"strconv"
+	"github.com/veronicashkarova/server-for-calc/pkg/db"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
-var id = 0
-var expressions = contract.ExpressionsData{}
+func RegisterUser(user *contract.UserLogin) error {
+	_, err := db.InsertUser(user)
+	return err
+}
 
-func AddExpression(expression string) (string, string, error) {
-	id++
-	newId := strconv.Itoa(id)
+func LoginUser(user *contract.UserLogin) (string, error) {
+
+	if !db.CheckUser(user) {
+		return "", errors.New("USER NOT REGISTERED")
+	}
+
+	token, err := getToken(user.Login)
+
+	if err != nil {
+		return "tokenData", err
+	}
+
+	tokenData := contract.TokenData{Token: token}
+	jsonBytes, err := json.Marshal(tokenData)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonBytes), nil
+}
+
+func AddExpression(userLogin string, expression string) (string, string, error) {
+	var id int64
+	userId, err := db.SelectIdForUser(userLogin)
+
+	if err == nil {
+		dbExpression := db.Expression{
+			ID:         int64(id),
+			Expression: expression,
+			UserID:     userId,
+			Status:     contract.InProcess,
+			Result:     contract.Undefined,
+		}
+		id, err = db.InsertExpression(&dbExpression)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	newId := strconv.Itoa(int(id))
 	expressionData :=
 		contract.ExpressionData{
 			ID:     newId,
@@ -22,6 +67,7 @@ func AddExpression(expression string) (string, string, error) {
 		}
 
 	contract.ExpressionMap[newId] = contract.ExpressionMapData{
+		User:    userLogin,
 		Data:    expressionData,
 		ExpChan: make(chan float64),
 	}
@@ -36,13 +82,27 @@ func AddExpression(expression string) (string, string, error) {
 
 }
 
-func Expressions() (string, error) {
+func Expressions(userLogin string) (string, error) {
+	var expressionsData []contract.ExpressionData
 
-	for _, expression := range contract.ExpressionMap {
-		expressions.Expressions = append(expressions.Expressions, expression.Data)
+	userId, err := db.SelectIdForUser(userLogin)
+
+	if err == nil {
+		expressions, err := db.SelectExpressionsForUserId(userId)
+		if err == nil {
+			for _, expression := range expressions {
+				expressionsData = append(
+					expressionsData,
+					contract.ExpressionData{
+						ID:     fmt.Sprint(expression.ID),
+						Status: expression.Status,
+						Result: expression.Result,
+					})
+			}
+		}
 	}
 
-	jsonBytes, err := json.Marshal(expressions)
+	jsonBytes, err := json.Marshal(expressionsData)
 	if err != nil {
 		panic(err)
 	}
@@ -50,9 +110,9 @@ func Expressions() (string, error) {
 	return string(jsonBytes), nil
 }
 
-func GetExpressionForId(id string) (string, error) {
+func GetExpressionForId(userLogin string, id string) (string, error) {
 
-	expression, error := findExpressionForId(id)
+	expression, error := findExpressionForId(userLogin, id)
 
 	if error == nil {
 		jsonBytes, err := json.Marshal(expression)
@@ -71,14 +131,38 @@ func GetTask() (string, error) {
 		if err != nil {
 			panic(err)
 		}
-	
+
 		return string(jsonBytes), nil
 	default:
-	 return "", calc.ErrNotTask
+		return "", calc.ErrNotTask
 	}
 }
 
-func findExpressionForId(id string) (contract.ExpressionData, error) {
+func findExpressionForId(userLogin string, id string) (contract.ExpressionData, error) {
+	var expressionData contract.ExpressionData
+	userId, err := db.SelectIdForUser(userLogin)
+
+	if err == nil {
+		intId, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return expressionData, err
+		}
+		expression, err := db.SelectExpressionForId(intId)
+		if err != nil {
+			return expressionData, err
+		}
+
+		if userId == expression.UserID {
+			expressionData = contract.ExpressionData{
+				ID:     fmt.Sprint(expression.ID),
+				Status: expression.Status,
+				Result: expression.Result,
+			}
+		}
+
+		return expressionData, nil
+	}
+
 	name, found := contract.ExpressionMap[id]
 	if !found {
 		return contract.ExpressionData{}, calc.ErrNotFound
@@ -91,10 +175,56 @@ func SendResult(id int, result float64) error {
 	_, exists := contract.ExpressionMap[fmt.Sprint(id)]
 	if exists {
 		task := contract.ExpressionMap[fmt.Sprint(id)].Data
-		if (task.Result != contract.Done) {
+		if task.Result != contract.Done {
 			contract.ExpressionMap[fmt.Sprint(id)].ExpChan <- result
 			return nil
-		} 
+		}
 	}
 	return calc.ErrNotFound
+}
+
+func getToken(login string) (string, error) {
+
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"name": login,
+		"nbf":  now.Unix(),
+		"exp":  now.Add(contract.TokenExpiredTimeHours * time.Hour).Unix(),
+		"iat":  now.Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(contract.CalcServerSecret))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
+}
+
+func CheckToken(tokenString string) (string, error) {
+
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return []byte(""), errors.New("BAD AUTORIZATION TOKEN")
+		}
+		return []byte(contract.CalcServerSecret), nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	userLogin := ""
+	if claims, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		if claims != nil {
+			userLogin, ok = claims["name"].(string)
+			if !ok {
+				return "", errors.New("BAD AUTORIZATION TOKEN")
+			}
+		}
+	} else {
+		return "", errors.New("BAD AUTORIZATION TOKEN")
+	}
+
+	return userLogin, nil
 }

@@ -1,15 +1,24 @@
 package contract
 
 type Config struct {
-	Addr string
-	TIME_ADDITION_MS int
-	TIME_SUBTRACTION_MS int
+	Addr                    string
+	TIME_ADDITION_MS        int
+	TIME_SUBTRACTION_MS     int
 	TIME_MULTIPLICATIONS_MS int
-	TIME_DIVISIONS_MS int
+	TIME_DIVISIONS_MS       int
+}
+
+type TokenData struct {
+	Token string `json:"token"`
 }
 
 type RequestData struct {
 	Expression string `json:"expression"`
+}
+
+type UserLogin struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
 }
 
 type ResponseData struct {
@@ -40,15 +49,19 @@ type TaskResult struct {
 }
 
 type ExpressionMapData struct {
-	Data      ExpressionData
-	ExpChan   chan float64
+	User    string
+	Data    ExpressionData
+	ExpChan chan float64
 }
 
+const CalcServerSecret = "calc_server_signature"
+const TokenExpiredTimeHours = 24
+
 var (
-	InProcess = "в процессе выполнения"
-	Done      = "Выполнено"
-	Undefined = "Неизвестно"
-	AppConfig *Config
+	InProcess     = "IN PROGRESS"
+	Done          = "DONE"
+	Undefined     = "UNKNOWN"
+	AppConfig     *Config
 	ExpressionMap = make(map[string]ExpressionMapData)
-	TaskChannel = make(chan TaskData, 100)
+	TaskChannel   = make(chan TaskData, 100)
 )

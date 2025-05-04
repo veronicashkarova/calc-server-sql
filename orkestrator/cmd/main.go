@@ -6,5 +6,7 @@ import (
 
 func main() {
 	app := application.New()
+	app.CreareDataBase()
 	app.RunServer()
+	
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"github.com/veronicashkarova/server-for-calc/pkg/contract"
+	"github.com/veronicashkarova/server-for-calc/pkg/db"
 ) 
 
 
@@ -64,10 +65,20 @@ type TaskRequest struct {
 }
 
 func (a *Application) RunServer() error {
-	http.HandleFunc("/api/v1/calculate", NewExpressionHandler)
-	http.HandleFunc("/api/v1/expressions", ExpressionsHandler)
-	http.HandleFunc("/api/v1/expressions/", IdHandler)
-	http.HandleFunc("/internal/task", TaskHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/register", RegisterUserHandler)
+	mux.HandleFunc("/api/v1/login", LoginUserHandler)
+	mux.HandleFunc("/internal/task", TaskHandler)
+	calculate := AutorizationMiddleware(http.HandlerFunc(NewExpressionHandler))
+    expressions := AutorizationMiddleware(http.HandlerFunc(ExpressionsHandler))
+	idExpressions := AutorizationMiddleware(http.HandlerFunc(IdHandler))
+	mux.Handle("/api/v1/calculate", calculate)
+	mux.Handle("/api/v1/expressions", expressions)
+	mux.Handle("/api/v1/expressions/", idExpressions)
 	fmt.Println("Server started")
-	return http.ListenAndServe("", nil)
+	return http.ListenAndServe("", mux)
+}
+
+func (a *Application) CreareDataBase()  {
+	db.CreateDb()
 }

@@ -1,9 +1,8 @@
 package calc
 
 import (
-	"fmt"
-	"strconv"
 	"github.com/veronicashkarova/server-for-calc/pkg/contract"
+	"strconv"
 )
 
 type stack struct {
@@ -132,7 +131,6 @@ func Calc(expression string, id string, taskChan chan contract.TaskData) (float6
 }
 
 func WaitResult(strId string, arg1 float64, arg2 float64, operation string, delay int, taskChan chan contract.TaskData) float64 {
-	fmt.Println("WaitResult", arg1, arg2, operation)
 	id, _ := strconv.Atoi(strId)
 	taskData := contract.TaskData{
 		ID:            id,
@@ -143,6 +141,5 @@ func WaitResult(strId string, arg1 float64, arg2 float64, operation string, dela
 	}
 	taskChan <- taskData
 	result := <-contract.ExpressionMap[strId].ExpChan
-	fmt.Println("channel result - ", result)
 	return result
 }
