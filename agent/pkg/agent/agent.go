@@ -1,14 +1,16 @@
 package agent
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
+	"os"
 	"sync"
 	"time"
+
+	pb "github.com/veronicashkarova/agent/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Task struct {
@@ -24,30 +26,56 @@ type Result struct {
 	Result float64 `json:"result"`
 }
 
-func RunAgent(power int, delay int) {
+func RunGrpcAgent(power int, delay int) {
 	fmt.Println("start agent")
+
+	host := "localhost"
+	port := "5000"
+
+	addr := fmt.Sprintf("%s:%s", host, port) // используем адрес сервера
+	// установим соединение
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	if err != nil {
+		log.Println("could not connect to grpc server: ", err)
+		os.Exit(1)
+	}
+	// закроем соединение, когда выйдем из функции
+	defer conn.Close()
+
+	grpcClient := pb.NewCalculatorServiceClient(conn)
 
 	var wg sync.WaitGroup
 	for i := 1; i <= 5; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startAgent(delay)
+			startGrpcAgent(grpcClient, delay)
 		}()
 	}
 
 	wg.Wait()
 }
 
-func startAgent(delay int) {
-	orchestratorURL := "http://localhost"
+func startGrpcAgent(client pb.CalculatorServiceClient, delay int) {
+	ctx := context.TODO()
 
 	for {
-		task, err := getTask(orchestratorURL + "/internal/task")
+		req, err := client.GetTask(ctx, &pb.EmptyRequest{})
+
 		if err != nil {
 			log.Printf("Ошибка получения задачи. Повторная попытка через %d секунд...", delay/1000)
 			Delay(delay)
 			continue
+		}
+
+		task := Task{
+			ID:            int(req.Id),
+			Arg1:          float64(req.Arg1),
+			Arg2:          float64(req.Arg2),
+			Operation:     req.Operation,
+			OperationTime: int(req.OperationTime),
 		}
 
 		operationTimer := time.NewTimer(time.Duration(task.OperationTime * int(time.Millisecond)))
@@ -59,7 +87,11 @@ func startAgent(delay int) {
 			continue
 		}
 
-		err = submitResult(orchestratorURL+"/internal/task", &result)
+		_, err = client.GetResult(ctx, &pb.TaskResult{
+			Id:     int32(result.ID),
+			Result: float32(result.Result),
+		})
+
 		if err != nil {
 			log.Printf("Ошибка отправки результата задачи")
 			Delay(delay)
@@ -73,33 +105,6 @@ func startAgent(delay int) {
 func Delay(delay int) {
 	delayTimer := time.NewTimer(time.Duration(delay * int(time.Millisecond)))
 	<-delayTimer.C
-}
-
-func getTask(url string) (Task, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return Task{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return Task{}, fmt.Errorf("неуспешный код ответа: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return Task{}, err
-	}
-
-	var task Task
-	err = json.Unmarshal(body, &task)
-	if err != nil {
-		return Task{}, err
-	}
-
-	fmt.Println("task", task)
-
-	return task, nil
 }
 
 func executeTask(task Task) (Result, error) {
@@ -118,19 +123,4 @@ func executeTask(task Task) (Result, error) {
 	}
 
 	return Result{ID: task.ID, Result: result}, nil
-}
-
-func submitResult(url string, result *Result) error {
-	jsonData, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	return nil
 }

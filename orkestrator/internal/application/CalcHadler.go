@@ -154,31 +154,6 @@ func IdHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, result)
 }
 
-func TaskHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Body == http.NoBody {
-		result, err := orkestrator.GetTask()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		fmt.Fprint(w, result)
-
-	} else {
-		taskRequest := new(TaskRequest)
-		defer r.Body.Close()
-		err := json.NewDecoder(r.Body).Decode(&taskRequest)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		var resultErr = orkestrator.SendResult(taskRequest.ID, taskRequest.Result)
-		if resultErr != nil {
-			http.Error(w, resultErr.Error(), http.StatusInternalServerError)
-		}
-		w.WriteHeader(http.StatusOK)
-	}
-}
-
 func isIdExpressionRequest(url *url.URL) (string, error) {
 
 	// Разделяем путь на сегменты

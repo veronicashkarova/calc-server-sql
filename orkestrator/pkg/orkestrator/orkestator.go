@@ -124,17 +124,12 @@ func GetExpressionForId(userLogin string, id string) (string, error) {
 	return "", error
 }
 
-func GetTask() (string, error) {
+func GetTaskData() (contract.TaskData, error) {
 	select {
 	case task := <-contract.TaskChannel:
-		jsonBytes, err := json.Marshal(task)
-		if err != nil {
-			panic(err)
-		}
-
-		return string(jsonBytes), nil
+		return task, nil
 	default:
-		return "", calc.ErrNotTask
+		return contract.TaskData{}, calc.ErrNotTask
 	}
 }
 

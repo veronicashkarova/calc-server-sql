@@ -42,5 +42,5 @@ func New() *Application {
 }
 
 func (a *Application) RunAgent() {
-	agent.RunAgent(a.config.COMPUTING_POWER, a.config.IDLE_DELAY)
+	agent.RunGrpcAgent(a.config.COMPUTING_POWER, a.config.IDLE_DELAY)
 }
